@@ -12,63 +12,167 @@
 #include <string.h>
 #include "main.h"
 
-char cpy_buffer[128];
+#define FALHA 0
+#define SUCESSO 1
+
+char cpy_buffer[256];
 char *pBuf = cpy_buffer;
-size_t len;
 char response[128];
 volatile char IsJsonMsg;
+volatile char IsFlagOverFlow = 0;
+size_t len;
+static volatile uint32_t rx_idx = 0; //onde o proximo pacote vai ser gravado
 
 int cpBuf_usb(char *buf,uint8_t *buf_origem, uint32_t len){
-	memcpy(buf,buf_origem,len);
-	buf[len] = '\0';
-	IsJsonMsg = 1;
-	return 0;
 
-}
-
-int tratar_json(char *data, size_t len, char *response){
-
-
-	strcpy(response,"LED Comando invalido");
-//	if(len <= 0){
-//		printf("data len inválido");
-//	}
-	IsJsonMsg = 0;
-	if(data[0] == '{'){
-		cJSON *json = cJSON_Parse(data);
-//		if(json == NULL){
-
-//		}
-		if(cJSON_IsString(cJSON_GetObjectItem(json, "LED")) && (cJSON_GetObjectItem(json, "LED")->valuestring)){
-			if(strcmp(cJSON_GetObjectItemCaseSensitive(json, "LED")->valuestring, "LIGAR")== 0){
-				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-				strcpy(response,"LED LIGADO");
-			}
-			else if (strcmp(cJSON_GetObjectItemCaseSensitive(json, "LED")->valuestring, "DESLIGAR")== 0){
-				HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-				strcpy(response,"LED DESLIGADO");
-			}
-			else{
-				strcpy(response,"LED Comando invalido");
-			}
-		}
-
-			cJSON *response_ptr = cJSON_CreateObject();
-
-			cJSON_AddStringToObject(response_ptr, "payload",response);
-			char *json_str = cJSON_PrintUnformatted(response_ptr);
-			if(json_str != NULL){
-				CDC_Transmit_FS((uint8_t*)json_str, strlen(json_str));
-			}
-
-			cJSON_free(json_str);
-			cJSON_Delete(response_ptr);
-			cJSON_Delete(json);
-//			IsJsonMsg = 0;
+	if(IsJsonMsg){
+	    return 1;   // ainda processando a mensagem anterior, descarta
 	}
 
+	if(rx_idx + len >= 256){
+		IsFlagOverFlow = 1;
+		IsJsonMsg = 1;
+		return 1;
+	}
+	memcpy(buf + rx_idx,buf_origem,len);
+	rx_idx += len;
+	buf[rx_idx+1] = '\0';
+	if(buf[rx_idx-1] == '\n'){
+		IsJsonMsg = 1;
+	}
+//	IsJsonMsg = 1;
 	return 0;
+
 }
+
+//void enviar_reply(char *buf_reply, bool status){
+//
+//	cJSON_AddBoolToObject(json_log, "status",status);
+//	cJSON_AddStringToObject(json_log, "error",*buf_reply);
+//	char *json_str = cJSON_PrintUnformatted(response_ptr);
+//	CDC_Transmit_FS((uint8_t*)json_str, strlen(response_ptr));
+//
+//}
+
+void tratar_json(char *data, size_t len, char *response){
+
+
+
+//	IsJsonMsg = 0;
+	if(IsFlagOverFlow){
+		enviar_reply("OVERFLOW", FALHA);
+		IsFlagOverFlow = 0;
+		return;
+	}
+	if(data[0] == '{'){
+		cJSON *json = cJSON_Parse(data);
+		if(json == NULL){
+		    enviar_reply("Json_invalido", FALHA);
+		    return;
+		}
+
+		//	{"action":"post","data":{"id":1024,"device":"stm32_board_01","param":{"cmd":"on","speed":0,"repeat":0}}}
+		//	{"action":"reply","data":{"id":1024,"device":"stm32_board_01","log":{"status":true,"error":"none"}}}
+
+		if(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(json, "action")) && (cJSON_GetObjectItemCaseSensitive(json, "action")->valuestring)){
+
+			if(strcmp(cJSON_GetObjectItemCaseSensitive(json, "action")->valuestring, "post") == 0){
+				cJSON *data_obj  = cJSON_GetObjectItemCaseSensitive(json, "data");
+				cJSON *obj_param = cJSON_GetObjectItemCaseSensitive(data_obj, "param");
+				if(cJSON_IsObject(obj_param)){
+					if(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(obj_param,"cmd")) && cJSON_GetObjectItemCaseSensitive(obj_param, "cmd")->valuestring){
+						if(strcmp(cJSON_GetObjectItemCaseSensitive(obj_param, "cmd")->valuestring, "on")== 0){
+							HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+							strcpy(response,"none"); //criar função ligar
+							enviar_reply(response,SUCESSO);
+						}
+						else if(strcmp(cJSON_GetObjectItemCaseSensitive(obj_param, "cmd")->valuestring, "off")== 0){
+							HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+							strcpy(response,"none");
+							enviar_reply(response,SUCESSO);
+						}
+
+						else if((strcmp(cJSON_GetObjectItemCaseSensitive(obj_param, "cmd")->valuestring, "blink")== 0)  &&
+							cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(obj_param,"speed")) &&
+							cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(obj_param,"repeat"))){
+
+							int repeat = cJSON_GetObjectItemCaseSensitive(obj_param, "repeat")->valueint;
+							int speed = cJSON_GetObjectItemCaseSensitive(obj_param, "speed")->valueint;
+
+							if((cJSON_GetObjectItemCaseSensitive(obj_param, "speed")->valueint > 5000) || (cJSON_GetObjectItemCaseSensitive(obj_param, "speed")->valueint <100)){
+								strcpy(response, "speed invalido");
+								enviar_reply(response,FALHA);
+								return;
+							}
+
+							if(cJSON_GetObjectItemCaseSensitive(obj_param, "repeat")->valueint >1000 || (cJSON_GetObjectItemCaseSensitive(obj_param, "repeat")->valueint <= 0)){
+
+								strcpy(response, "repeat invalido");
+								enviar_reply(response,FALHA);
+								return;
+							}
+							strcpy(response, "none");
+							enviar_reply(response,SUCESSO);
+
+							for(int i =0; i < repeat; i++){
+							    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+							    HAL_Delay(speed);
+							    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+							    HAL_Delay(speed);
+							}
+						}
+
+					}else{
+						strcpy(response, "cmd invalido");
+						enviar_reply(response,FALHA);
+						return;
+					}
+				}
+			}else{
+				strcpy(response, "action invalido");
+				enviar_reply(response,FALHA);
+				return;
+		}
+
+			cJSON_Delete(json);
+
+		}else{
+
+			enviar_reply("Json_invalido",FALHA);
+		}
+
+	}
+}
+
+void enviar_reply(const char *buf_reply, bool status){
+
+//	{"action":"reply","data":{"id":1024,"device":"stm32_board_01","log":{"status":true,"error":"none"}}}
+
+
+	    cJSON *response_ptr = cJSON_CreateObject();
+	    cJSON *json_data = cJSON_CreateObject();
+	    cJSON *json_log = cJSON_CreateObject();
+
+	    cJSON_AddStringToObject(response_ptr, "action", "reply");
+	    cJSON_AddNumberToObject(json_data, "id", 1024);
+	    cJSON_AddStringToObject(json_data, "device", "stm32_board_01");
+	    cJSON_AddBoolToObject(json_log, "status", status);
+	    cJSON_AddStringToObject(json_log, "error", buf_reply);
+	    cJSON_AddItemToObject(json_data, "log", json_log);
+	    cJSON_AddItemToObject(response_ptr, "data", json_data);
+
+	    char *json_str = cJSON_PrintUnformatted(response_ptr);
+	    if(json_str != NULL){
+	    	int len = strlen(json_str);
+	    	json_str[len+1] = '\n';
+	        CDC_Transmit_FS((uint8_t*)json_str, strlen(json_str));
+	        cJSON_free(json_str);
+	    }
+	    cJSON_Delete(response_ptr);
+
+	    return;
+}
+
 
 void read_usb(){
 
@@ -76,6 +180,9 @@ void read_usb(){
 	if(IsJsonMsg){
 
 		tratar_json(pBuf,len,response);
+		rx_idx = 0;
+		IsJsonMsg = 0;
 //		uint16_t bytesRecebidos = CDC_GetRxBufferBytesAvailable_FS();
 	}
+	return;
 }

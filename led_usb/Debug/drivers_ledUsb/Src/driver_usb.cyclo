@@ -1,3 +1,4 @@
-/home/carlos-leite/Firmware/atividade1/drivers_ledUsb/Src/driver_usb.c:21:5:cpBuf_usb	1
-/home/carlos-leite/Firmware/atividade1/drivers_ledUsb/Src/driver_usb.c:29:5:tratar_json	7
-/home/carlos-leite/Firmware/atividade1/drivers_ledUsb/Src/driver_usb.c:73:6:read_usb	2
+/home/carlos-leite/Firmware/atividade1/drivers_ledUsb/Src/driver_usb.c:26:5:cpBuf_usb	4
+/home/carlos-leite/Firmware/atividade1/drivers_ledUsb/Src/driver_usb.c:57:6:tratar_json	20
+/home/carlos-leite/Firmware/atividade1/drivers_ledUsb/Src/driver_usb.c:147:6:enviar_reply	2
+/home/carlos-leite/Firmware/atividade1/drivers_ledUsb/Src/driver_usb.c:177:6:read_usb	2
