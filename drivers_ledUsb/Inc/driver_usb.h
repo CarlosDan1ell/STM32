@@ -12,12 +12,12 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-extern char cpy_buffer[256];
-extern volatile char IsJsonMsg;
+char response[128];
+size_t len;
+char data[RX_MSG_MAX];
 
-int cpBuf_usb(char *buf,uint8_t *buf_origem, uint32_t len);
+
 void tratar_json(char *data, size_t len, char *response);
-void read_usb(void);
 void enviar_reply(const char *buf_reply, bool status);
 
 #endif /* INC_DRIVER_USB_H_ */
